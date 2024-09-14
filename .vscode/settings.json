@@ -2,7 +2,8 @@
     "nrf-connect.applications": [
         "${workspaceFolder}\\lesson-1\\exercise-1",
         "${workspaceFolder}\\lesson-2\\exercise-1",
-        "${workspaceFolder}\\lesson-2\\exercise-2"
+        "${workspaceFolder}\\lesson-2\\exercise-2",
+        "${workspaceFolder}\\lesson-2\\exercise-3"
     ],
     "cmake.sourceDirectory": "C:/git_repos/course-bluetooth-low-energy-fundamentals/lesson-1/exercise-1"
 }
