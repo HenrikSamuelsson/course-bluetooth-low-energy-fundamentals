@@ -17,6 +17,7 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include <zephyr/types.h>
 
 /** @brief LBS Service UUID. */
