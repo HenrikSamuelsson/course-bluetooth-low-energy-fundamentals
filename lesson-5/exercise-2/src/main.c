@@ -15,6 +15,7 @@
 #include "lbs.h"
 
 /* STEP 1.2 - Add the header file for the Settings module */
+#include <zephyr/settings/settings.h>
 
 LOG_MODULE_REGISTER(Lesson5_Exercise2, LOG_LEVEL_INF);
 
@@ -124,7 +125,7 @@ static bool app_button_cb(void)
 	return app_button_state;
 }
 
-static struct bt_lbs_cb lbs_callbacs = {
+static struct bt_lbs_cb lbs_callbacks = {
 	.led_cb = app_led_cb,
 	.button_cb = app_button_cb,
 };
@@ -188,8 +189,9 @@ int main(void)
 	LOG_INF("Bluetooth initialized\n");
 
 	/* STEP 1.3 - Add setting load function */
+    settings_load();
 
-	err = bt_lbs_init(&lbs_callbacs);
+	err = bt_lbs_init(&lbs_callbacks);
 	if (err) {
 		LOG_INF("Failed to init LBS (err:%d)\n", err);
 		return -1;
