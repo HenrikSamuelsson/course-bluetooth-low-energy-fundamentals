@@ -28,15 +28,22 @@ LOG_MODULE_REGISTER(Lesson5_Exercise2, LOG_LEVEL_INF);
 
 #define USER_LED DK_LED3
 
-#define USER_BUTTON DK_BTN1_MSK
-
+#define USER_BUTTON             DK_BTN1_MSK
 /* STEP 2.1 - Add extra button for bond deleting function */
-
-/* STEP 4.2.1 - Add extra button for enablig pairing mode */
+#define BOND_DELETE_BUTTON      DK_BTN2_MSK
+/* STEP 4.2.1 - Add extra button for enabling pairing mode */
+#define PAIRING_BUTTON          DK_BTN3_MSK
 
 /* STEP 3.2.1 - Define advertising parameter for no Accept List */
+#define BT_LE_ADV_CONN_NO_ACCEPT_LIST                                         \
+  BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_ONE_TIME,         \
+                  BT_GAP_ADV_FAST_INT_MIN_2, BT_GAP_ADV_FAST_INT_MAX_2, NULL)
 
 /* STEP 3.2.2 - Define advertising parameter for when Accept List is used */
+#define BT_LE_ADV_CONN_ACCEPT_LIST                                            \
+  BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_FILTER_CONN |     \
+                      BT_LE_ADV_OPT_ONE_TIME,                                 \
+                  BT_GAP_ADV_FAST_INT_MIN_2, BT_GAP_ADV_FAST_INT_MAX_2, NULL)
 
 static bool app_button_state;
 
@@ -49,11 +56,63 @@ static const struct bt_data sd[] = {
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_LBS_VAL),
 };
 
-/* STEP 3.3.1 - Define the callback to add addreses to the Accept List */
+/* STEP 3.3.1 - Define the callback to add addresses to the Accept List */
+static void setup_accept_list_cb(const struct bt_bond_info *info,
+                                 void *user_data) {
+  int *bond_cnt = user_data;
+  if ((*bond_cnt) < 0) {
+    return;
+  }
+  int err = bt_le_filter_accept_list_add(&info->addr);
+  LOG_INF("Added following peer to whitelist: %x %x \n", info->addr.a.val[0],
+          info->addr.a.val[1]);
+  if (err) {
+    LOG_INF("Cannot add peer to Filter Accept List (err: %d)\n", err);
+    (*bond_cnt) = -EIO;
+  } else {
+    (*bond_cnt)++;
+  }
+}
 
 /* STEP 3.3.2 - Define the function to loop through the bond list */
+static int setup_accept_list(uint8_t local_id)
+{
+	int err = bt_le_filter_accept_list_clear();
+	if (err) {
+		LOG_INF("Cannot clear Filter Accept List (err: %d)\n", err);
+		return err;
+	}
+	int bond_cnt = 0;
+	bt_foreach_bond(local_id, setup_accept_list_cb, &bond_cnt);
+	return bond_cnt;
+}
 
 /* STEP 3.4.1 - Define the function to advertise with the Accept List */
+void advertise_with_accept_list(struct k_work *work)
+{
+	int err=0;
+	int allowed_cnt= setup_accept_list(BT_ID_DEFAULT);
+	if (allowed_cnt<0){
+		LOG_INF("Accept list setup failed (err:%d)\n", allowed_cnt);
+	} else {
+		if (allowed_cnt==0){
+			LOG_INF("Advertising with no Filter Accept list\n"); 
+			err = bt_le_adv_start(BT_LE_ADV_CONN_NO_ACCEPT_LIST, ad, ARRAY_SIZE(ad),
+					sd, ARRAY_SIZE(sd));
+		}
+		else {
+			LOG_INF("Accept list setup number  = %d \n",allowed_cnt);
+			err = bt_le_adv_start(BT_LE_ADV_CONN_ACCEPT_LIST, ad, ARRAY_SIZE(ad),
+				sd, ARRAY_SIZE(sd));	
+		}
+		if (err) {
+		 	LOG_INF("Advertising failed to start (err %d)\n", err);
+			return;
+		}
+		LOG_INF("Advertising successfully started\n");
+	}
+}
+K_WORK_DEFINE(advertise_accept_list_work, advertise_with_accept_list);
 
 static void on_connected(struct bt_conn *conn, uint8_t err)
 {
@@ -72,6 +131,7 @@ static void on_disconnected(struct bt_conn *conn, uint8_t reason)
 	LOG_INF("Disconnected (reason %u)\n", reason);
 	dk_set_led_off(CON_STATUS_LED);
 	/* STEP 3.5 - Start advertising with Accept List */
+    k_work_submit(&advertise_acceptlist_work);
 }
 
 static void on_security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err)
@@ -139,8 +199,41 @@ static void button_changed(uint32_t button_state, uint32_t has_changed)
 		app_button_state = user_button_state ? true : false;
 	}
 	/* STEP 2.2 - Add extra button handling to remove bond information */
+    if (has_changed & BOND_DELETE_BUTTON) {
+	uint32_t bond_delete_button_state = button_state & BOND_DELETE_BUTTON;
+	if (bond_delete_button_state==0) {
+		int err= bt_unpair(BT_ID_DEFAULT,BT_ADDR_LE_ANY);
+		if (err) {
+			LOG_INF("Cannot delete bond (err: %d)\n", err);
+		} else	{
+			LOG_INF("Bond deleted successfully \n");
+		}				
+	}
+}
 
 	/* STEP 4.2.2 Add extra button handling to advertise without using Accept List */
+    if (has_changed & PAIRING_BUTTON) {
+	uint32_t pairing_button_state = button_state & PAIRING_BUTTON;
+	if (pairing_button_state==0) {
+		int err_code = bt_le_adv_stop();
+		if (err_code) {
+			LOG_INF("Cannot stop advertising err= %d \n", err_code);
+			return;
+		}
+		err_code = bt_le_filter_accept_list_clear();
+		if (err_code) {
+			LOG_INF("Cannot clear accept list (err: %d)\n", err_code);
+		} else	{
+			LOG_INF("Filter Accept List cleared successfully");
+		}				
+		err_code = bt_le_adv_start(BT_LE_ADV_CONN_NO_ACCEPT_LIST, ad, ARRAY_SIZE(ad),	sd, ARRAY_SIZE(sd));
+		if (err_code) {
+			LOG_INF("Cannot start open advertising (err: %d)\n", err_code);
+		} else	{
+			LOG_INF("Advertising in pairing mode started");
+		}	
+	}	
+}
 }
 
 static int init_button(void)
@@ -197,13 +290,16 @@ int main(void)
 		return -1;
 	}
 	/* STEP 3.4.2 - Start advertising with the Accept List */
+    k_work_submit(&advertise_accept_list_work);
 
 	/* STEP 3.4.3 - Remove the original code that does normal advertising */
-	err = bt_le_adv_start(BT_LE_ADV_CONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	/*
+    err = bt_le_adv_start(BT_LE_ADV_CONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 	if (err) {
 		LOG_INF("Advertising failed to start (err %d)\n", err);
 		return -1;
 	}
+    */
 
 	LOG_INF("Advertising successfully started\n");
 
